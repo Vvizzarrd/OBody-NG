@@ -768,73 +768,105 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         return set;
     }
 
-    // Shared smoothing: stop the sides/underside of the breasts from caving in under outfits.
-    AddSliderToSet(set, DeriveSlider(a_actor, "BreastSideShape", 0.0F));
-    AddSliderToSet(set, DeriveSlider(a_actor, "BreastUnderDepth", 0.0F));
-
     switch (a_refitClass) {
     case RefitClass::HeavyArmor:
-        // Rigid cuirass: strongest compression, least forced cleavage/togetherness.
-        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 0.20F));
-        AddSliderToSet(set, Slider{"BreastGravity2", -0.25F, -0.20F});
-        AddSliderToSet(set, Slider{"BreastTopSlope", -0.30F, -0.40F});
-        AddSliderToSet(set, Slider{"BreastsTogether", 0.05F, 0.10F});
-        AddSliderToSet(set, Slider{"Breasts", -0.12F});
-        AddSliderToSet(set, Slider{"BreastHeight", 0.10F});
+        // Heavy armor: close to original/default OBody ORefit behavior.
+        // Strongest shaping and nipple suppression. This is the "rigid cuirass" profile.
+        AddSliderToSet(set, DeriveSlider(a_actor, "BreastSideShape", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "BreastUnderDepth", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 1.0F));
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.10F, -0.05F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.20F, -0.35F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.30F, 0.35F});
+        AddSliderToSet(set, Slider{"Breasts", -0.05F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.15F});
         break;
 
     case RefitClass::LightArmor:
-        // Light armor: moderate shaping, still less aggressive than old one-size ORefit.
-        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 0.55F));
-        AddSliderToSet(set, Slider{"BreastGravity2", -0.15F, -0.10F});
-        AddSliderToSet(set, Slider{"BreastTopSlope", -0.20F, -0.25F});
-        AddSliderToSet(set, Slider{"BreastsTogether", 0.15F, 0.20F});
-        AddSliderToSet(set, Slider{"Breasts", -0.07F});
-        AddSliderToSet(set, Slider{"BreastHeight", 0.12F});
+        // Light armor: more structured than clothing, clearly less aggressive than heavy.
+        AddSliderToSet(set, Slider{"BreastSideShape", -0.04F});
+        AddSliderToSet(set, Slider{"BreastUnderDepth", -0.04F});
+        AddSliderToSet(set, Slider{"BreastCleavage", 0.12F});
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.06F, -0.04F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.10F, -0.15F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.16F, 0.20F});
+        AddSliderToSet(set, Slider{"Breasts", -0.035F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.08F});
         break;
 
     case RefitClass::Clothing:
     default:
-        // Clothing/robes: closest to original ORefit, but toned down slightly.
-        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 0.85F));
-        AddSliderToSet(set, Slider{"BreastGravity2", -0.10F, -0.05F});
-        AddSliderToSet(set, Slider{"BreastTopSlope", -0.15F, -0.25F});
-        AddSliderToSet(set, Slider{"BreastsTogether", 0.25F, 0.30F});
-        AddSliderToSet(set, Slider{"Breasts", -0.05F});
-        AddSliderToSet(set, Slider{"BreastHeight", 0.15F});
+        // Clothing/robes: closest to nude. Mild fabric support only.
+        // No full cancellation of breast/nipple shape here.
+        AddSliderToSet(set, Slider{"BreastSideShape", -0.015F});
+        AddSliderToSet(set, Slider{"BreastUnderDepth", -0.015F});
+        AddSliderToSet(set, Slider{"BreastCleavage", 0.04F});
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.03F, -0.02F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.05F, -0.08F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.08F, 0.10F});
+        AddSliderToSet(set, Slider{"Breasts", -0.015F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.04F});
         break;
     }
 
-    // Existing non-breast smoothing, kept mostly intact.
-    AddSliderToSet(set, DeriveSlider(a_actor, "ButtDimples", 0.0F));
-    AddSliderToSet(set, DeriveSlider(a_actor, "ButtUnderFold", 0.0F));
-    AddSliderToSet(set, Slider{"AppleCheeks", -0.05F});
-    AddSliderToSet(set, Slider{"Butt", -0.05F});
-
-    AddSliderToSet(set, DeriveSlider(a_actor, "Clavicle_v2", 0.0F));
-    AddSliderToSet(set, DeriveSlider(a_actor, "NavelEven", 1.0F));
-    AddSliderToSet(set, DeriveSlider(a_actor, "HipCarved", 0.0F));
+    // Existing non-breast smoothing, scaled so clothing is closest to nude.
+    if (a_refitClass == RefitClass::HeavyArmor) {
+        AddSliderToSet(set, DeriveSlider(a_actor, "ButtDimples", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "ButtUnderFold", 0.0F));
+        AddSliderToSet(set, Slider{"AppleCheeks", -0.05F});
+        AddSliderToSet(set, Slider{"Butt", -0.05F});
+        AddSliderToSet(set, DeriveSlider(a_actor, "Clavicle_v2", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "NavelEven", 1.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "HipCarved", 0.0F));
+    } else if (a_refitClass == RefitClass::LightArmor) {
+        AddSliderToSet(set, Slider{"AppleCheeks", -0.03F});
+        AddSliderToSet(set, Slider{"Butt", -0.03F});
+        AddSliderToSet(set, Slider{"NavelEven", 0.20F});
+    } else {
+        AddSliderToSet(set, Slider{"AppleCheeks", -0.015F});
+        AddSliderToSet(set, Slider{"Butt", -0.015F});
+        AddSliderToSet(set, Slider{"NavelEven", 0.08F});
+    }
 
     if (setNippleSlidersRefitEnabled) {
-        // Heavier armor should hide nipples hardest; clothing is softer; light armor is in between.
-        const float nipBGoneTarget = a_refitClass == RefitClass::HeavyArmor ? 1.0F :
-                                     a_refitClass == RefitClass::LightArmor ? 0.85F :
-                                                                              0.70F;
-        const float areolaTarget = a_refitClass == RefitClass::HeavyArmor ? -0.50F :
-                                   a_refitClass == RefitClass::LightArmor ? -0.40F :
-                                                                            -0.30F;
-        const float nipplePerkTarget = a_refitClass == RefitClass::HeavyArmor ? -0.45F :
-                                       a_refitClass == RefitClass::LightArmor ? -0.35F :
-                                                                                -0.25F;
+        switch (a_refitClass) {
+        case RefitClass::HeavyArmor:
+            // Original-style OBody suppression: flatten/cover nipple and areola shape hard.
+            AddSliderToSet(set, DeriveSlider(a_actor, "NippleDip", 0.0F));
+            AddSliderToSet(set, DeriveSlider(a_actor, "NippleTip", 0.0F));
+            AddSliderToSet(set, DeriveSlider(a_actor, "NipplePuffy_v2", 0.0F));
+            AddSliderToSet(set, DeriveSlider(a_actor, "AreolaSize", -0.30F));
+            AddSliderToSet(set, DeriveSlider(a_actor, "NipBGone", 1.0F));
+            AddSliderToSet(set, Slider{"NippleDistance", 0.05F, 0.08F});
+            AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.10F});
+            AddSliderToSet(set, DeriveSlider(a_actor, "NipplePerkManga", -0.25F));
+            break;
 
-        AddSliderToSet(set, DeriveSlider(a_actor, "NippleDip", 0.0F));
-        AddSliderToSet(set, DeriveSlider(a_actor, "NippleTip", 0.0F));
-        AddSliderToSet(set, DeriveSlider(a_actor, "NipplePuffy_v2", 0.0F));
-        AddSliderToSet(set, DeriveSlider(a_actor, "AreolaSize", areolaTarget));
-        AddSliderToSet(set, DeriveSlider(a_actor, "NipBGone", nipBGoneTarget));
-        AddSliderToSet(set, Slider{"NippleDistance", 0.05F, 0.08F});
-        AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.1F});
-        AddSliderToSet(set, DeriveSlider(a_actor, "NipplePerkManga", nipplePerkTarget));
+        case RefitClass::LightArmor:
+            // Moderate suppression. Noticeable under armor, but not full heavy-armor cancellation.
+            AddSliderToSet(set, Slider{"NippleDip", -0.08F});
+            AddSliderToSet(set, Slider{"NippleTip", -0.08F});
+            AddSliderToSet(set, Slider{"NipplePuffy_v2", -0.08F});
+            AddSliderToSet(set, Slider{"AreolaSize", -0.12F});
+            AddSliderToSet(set, Slider{"NipBGone", 0.35F});
+            AddSliderToSet(set, Slider{"NippleDistance", 0.025F, 0.04F});
+            AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.04F});
+            AddSliderToSet(set, Slider{"NipplePerkManga", -0.12F});
+            break;
+
+        case RefitClass::Clothing:
+        default:
+            // Clothing: barely different from nude. Small fabric softening only.
+            AddSliderToSet(set, Slider{"NippleDip", -0.02F});
+            AddSliderToSet(set, Slider{"NippleTip", -0.02F});
+            AddSliderToSet(set, Slider{"NipplePuffy_v2", -0.02F});
+            AddSliderToSet(set, Slider{"AreolaSize", -0.03F});
+            AddSliderToSet(set, Slider{"NipBGone", 0.08F});
+            AddSliderToSet(set, Slider{"NippleDistance", 0.01F, 0.015F});
+            AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.015F});
+            AddSliderToSet(set, Slider{"NipplePerkManga", -0.03F});
+            break;
+        }
     }
 
     return set;
