@@ -6,6 +6,15 @@
 #include "SKEE.h"
 
 namespace Body {
+
+enum class RefitClass
+{
+    Nude,
+    Clothing,
+    LightArmor,
+    HeavyArmor
+};
+
     inline SKSE::RegistrationSet<RE::Actor*, std::string> OnActorGenerated("OnActorGenerated"sv);
     inline SKSE::RegistrationSet<RE::Actor*> OnActorNaked("OnActorNaked"sv);
     inline SKSE::RegistrationSet<RE::Actor*> OnActorRemovingClothes("OnActorRemovingClothes"sv);
@@ -38,7 +47,7 @@ namespace Body {
         void ApplySlider(RE::Actor* a_actor, const PresetManager::Slider& a_slider, const char* a_key,
                          float a_weight) const;
         void ApplySliderSet(RE::Actor* a_actor, PresetManager::SliderSet& a_sliders, const char* a_key) const;
-        void ApplyClothePreset(RE::Actor* a_actor) const;
+        void ApplyClothePreset(RE::Actor* a_actor) const; RefitClass GetRefitClass(RE::Actor* a_actor) const;
         void RemoveClothePreset(RE::Actor* a_actor) const;
         void ClearActorMorphs(RE::Actor* a_actor, bool updateMorphsWithoutTimer,
                               ::OBody::API::IPluginInterface* responsibleInterface) const;
@@ -58,7 +67,7 @@ namespace Body {
 
         static PresetManager::SliderSet GenerateRandomNippleSliders();
         static PresetManager::SliderSet GenerateRandomGenitalSliders();
-        PresetManager::SliderSet GenerateClotheSliders(RE::Actor* a_actor) const;
+        PresetManager::SliderSet GenerateClotheSliders(RE::Actor* a_actor, RefitClass a_refitClass) const;
 
         PresetManager::Slider DeriveSlider(RE::Actor* a_actor, const char* a_morph, float a_target) const;
 

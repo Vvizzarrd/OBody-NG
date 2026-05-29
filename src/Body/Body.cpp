@@ -2,6 +2,7 @@
 
 #include "JSONParser/JSONParser.h"
 #include "STL.h"
+#include <array>
 
 using namespace PresetManager;
 
@@ -374,44 +375,128 @@ namespace Body {
         for (const auto& slider : a_sliders | std::views::values) ApplySlider(a_actor, slider, a_key, weight);
     }
 
-    void OBody::ApplyClothePreset(RE::Actor* a_actor) const {
-        const auto& presetContainer{PresetContainer::GetInstance()};
+    RefitClass OBody::GetRefitClass(RE::Actor* a_actor) const
+{
+    using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
 
-        bool isFemale = IsFemale(a_actor);
+    if (!a_actor) {
+        return RefitClass::Nude;
+    }
 
-        std::optional<Preset> a_preset = std::nullopt;
+    const RE::TESObjectARMO* bodyArmor = a_actor->GetWornArmor(Slot::kBody);
+    const RE::TESObjectARMO* outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
+    const RE::TESObjectARMO* underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
 
-        auto& jsonParser{Parser::JSONParser::GetInstance()};
-        a_preset = jsonParser.GetRefitPresetFromEquippedItems(a_actor, isFemale);
+    // Priority is intentionally strongest-to-softest. A cuirass with ArmorHeavy should win
+    // over a light/clothing undergarment in a secondary chest slot.
+    const std::array<const RE::TESObjectARMO*, 3> wornChestItems{bodyArmor, outerChest, underChest};
 
-        if (a_preset) {
-            ApplySliderSet(a_actor, a_preset->sliders, "OClothe");
-            return;
-        }
-
-        const auto a_presetName = ActorTracker::Registry::GetInstance().GetPresetNameForActor(a_actor, isFemale);
-        if (a_presetName) {
-            const std::string refitPresetName = *a_presetName + "-Refit";
-            a_preset = GetPresetByNameForRandom(presetContainer.allFemalePresets, refitPresetName);
-        }
-        
-        if (!a_preset) {
-            if (isFemale) {
-                a_preset = GetPresetByNameForRandom(presetContainer.allFemalePresets, "Female-Refit");
-            }
-            else {
-                a_preset = GetPresetByNameForRandom(presetContainer.allMalePresets, "Male-Refit");
-            }
-        }
-
-        if (a_preset) {
-            ApplySliderSet(a_actor, a_preset->sliders, "OClothe");
-        }
-        else {
-            auto set{GenerateClotheSliders(a_actor)};
-            ApplySliderSet(a_actor, set, "OClothe");
+    for (const auto* armor : wornChestItems) {
+        if (armor && armor->HasKeywordString("ArmorHeavy")) {
+            return RefitClass::HeavyArmor;
         }
     }
+
+    for (const auto* armor : wornChestItems) {
+        if (armor && armor->HasKeywordString("ArmorLight")) {
+            return RefitClass::LightArmor;
+        }
+    }
+
+    for (const auto* armor : wornChestItems) {
+        if (armor) {
+            return RefitClass::Clothing;
+        }
+    }
+
+    return RefitClass::Nude;
+}
+
+void OBody::ApplyClothePreset(RE::Actor* a_actor) const
+{
+    const auto& presetContainer{PresetContainer::GetInstance()};
+    const bool isFemale = IsFemale(a_actor);
+    std::optional a_preset = std::nullopt;
+    auto& jsonParser{Parser::JSONParser::GetInstance()};
+
+    // Existing behavior: explicit outfit refit presets from JSON still have highest priority.
+    a_preset = jsonParser.GetRefitPresetFromEquippedItems(a_actor, isFemale);
+    if (a_preset) {
+        ApplySliderSet(a_actor, a_preset->sliders, "OClothe");
+        return;
+    }
+
+    // Existing behavior: actor-specific refit preset still wins, if present.
+    const auto a_presetName = ActorTracker::Registry::GetInstance().GetPresetNameForActor(a_actor, isFemale);
+    if (a_presetName) {
+        const std::string refitPresetName = *a_presetName + "-Refit";
+        a_preset = GetPresetByNameForRandom(
+            isFemale ? presetContainer.allFemalePresets : presetContainer.allMalePresets,
+            refitPresetName);
+    }
+
+    const RefitClass refitClass = GetRefitClass(a_actor);
+
+    if (refitClass == RefitClass::Nude) {
+        RemoveClothePreset(a_actor);
+        return;
+    }
+
+    // New behavior: allow global preset overrides per armor class.
+    // If these presets exist in BodySlide, they are used instead of generated hardcoded sliders.
+    if (!a_preset) {
+        std::string classPresetName;
+        if (isFemale) {
+            switch (refitClass) {
+            case RefitClass::HeavyArmor:
+                classPresetName = "Female-Refit-Heavy";
+                break;
+            case RefitClass::LightArmor:
+                classPresetName = "Female-Refit-Light";
+                break;
+            case RefitClass::Clothing:
+                classPresetName = "Female-Refit-Clothing";
+                break;
+            default:
+                classPresetName = "Female-Refit";
+                break;
+            }
+            a_preset = GetPresetByNameForRandom(presetContainer.allFemalePresets, classPresetName);
+        } else {
+            switch (refitClass) {
+            case RefitClass::HeavyArmor:
+                classPresetName = "Male-Refit-Heavy";
+                break;
+            case RefitClass::LightArmor:
+                classPresetName = "Male-Refit-Light";
+                break;
+            case RefitClass::Clothing:
+                classPresetName = "Male-Refit-Clothing";
+                break;
+            default:
+                classPresetName = "Male-Refit";
+                break;
+            }
+            a_preset = GetPresetByNameForRandom(presetContainer.allMalePresets, classPresetName);
+        }
+    }
+
+    // Existing behavior: legacy global refit preset fallback still works.
+    if (!a_preset) {
+        if (isFemale) {
+            a_preset = GetPresetByNameForRandom(presetContainer.allFemalePresets, "Female-Refit");
+        } else {
+            a_preset = GetPresetByNameForRandom(presetContainer.allMalePresets, "Male-Refit");
+        }
+    }
+
+    if (a_preset) {
+        ApplySliderSet(a_actor, a_preset->sliders, "OClothe");
+    } else {
+        auto set{GenerateClotheSliders(a_actor, refitClass)};
+        ApplySliderSet(a_actor, set, "OClothe");
+    }
+}
 
     void OBody::ClearActorMorphs(RE::Actor* a_actor, bool updateMorphsWithoutTimer,
                                  ::OBody::API::IPluginInterface* responsibleInterface) const {
@@ -675,70 +760,85 @@ namespace Body {
         return set;
     }
 
-    PresetManager::SliderSet OBody::GenerateClotheSliders(RE::Actor* a_actor) const {
-        PresetManager::SliderSet set;
-        // breasts
-        // make area on sides behind breasts not sink in
-        AddSliderToSet(set, DeriveSlider(a_actor, "BreastSideShape", 0.0F));
-        // make area under breasts not sink in
-        AddSliderToSet(set, DeriveSlider(a_actor, "BreastUnderDepth", 0.0F));
-        // push breasts together
-        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 1.0F));
-        // push up smaller breasts more
-        AddSliderToSet(set, Slider{"BreastGravity2", -0.1F, -0.05F});
-        // Make top of breast rise higher
-        AddSliderToSet(set, Slider{"BreastTopSlope", -0.2F, -0.35F});
-        // push breasts together
-        AddSliderToSet(set, Slider{"BreastsTogether", 0.3F, 0.35F});
-        // push breasts up
-        // AddSliderToSet(set, Slider{ "PushUp", 0.6f, 0.4f });
-        // Shrink breasts slightly
-        AddSliderToSet(set, Slider{"Breasts", -0.05F});
-        // Move breasts up on body slightly
-        AddSliderToSet(set, Slider{"BreastHeight", 0.15F});
+    PresetManager::SliderSet OBody::GenerateClotheSliders(RE::Actor* a_actor, const RefitClass a_refitClass) const
+{
+    PresetManager::SliderSet set;
 
-        // butt
-        // remove butt impressions
-        AddSliderToSet(set, DeriveSlider(a_actor, "ButtDimples", 0.0F));
-        AddSliderToSet(set, DeriveSlider(a_actor, "ButtUnderFold", 0.0F));
-        // shrink ass slightly
-        AddSliderToSet(set, Slider{"AppleCheeks", -0.05F});
-        AddSliderToSet(set, Slider{"Butt", -0.05F});
-
-        // Torso
-        // remove definition on clavical bone
-        AddSliderToSet(set, DeriveSlider(a_actor, "Clavicle_v2", 0.0F));
-        // Push out navel
-        AddSliderToSet(set, DeriveSlider(a_actor, "NavelEven", 1.0F));
-
-        // hip
-        // remove defintion on hip bone
-        AddSliderToSet(set, DeriveSlider(a_actor, "HipCarved", 0.0F));
-
-        if (setNippleSlidersRefitEnabled) {
-            // nipple
-            // sublte change to tip shape
-            AddSliderToSet(set, DeriveSlider(a_actor, "NippleDip", 0.0F));
-            AddSliderToSet(set, DeriveSlider(a_actor, "NippleTip", 0.0F));
-            // flatten areola
-            AddSliderToSet(set, DeriveSlider(a_actor, "NipplePuffy_v2", 0.0F));
-            // shrink areola
-            AddSliderToSet(set, DeriveSlider(a_actor, "AreolaSize", -0.3F));
-            // flatten nipple
-            AddSliderToSet(set, DeriveSlider(a_actor, "NipBGone", 1.0F));
-            // AddSliderToSet(set, DeriveSlider(a_actor, "NippleManga", -0.75f));
-            //  push nipples together
-            AddSliderToSet(set, Slider{"NippleDistance", 0.05F, 0.08F});
-            // Lift large breasts up
-            AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.1F});
-            // Flatten nipple + areola
-            AddSliderToSet(set, DeriveSlider(a_actor, "NipplePerkManga", -0.25F));
-            // Flatten nipple
-            // AddSliderToSet(set, DeriveSlider(a_actor, "NipplePerkiness", 0.0f));
-        }
-
+    if (a_refitClass == RefitClass::Nude) {
         return set;
     }
+
+    // Shared smoothing: stop the sides/underside of the breasts from caving in under outfits.
+    AddSliderToSet(set, DeriveSlider(a_actor, "BreastSideShape", 0.0F));
+    AddSliderToSet(set, DeriveSlider(a_actor, "BreastUnderDepth", 0.0F));
+
+    switch (a_refitClass) {
+    case RefitClass::HeavyArmor:
+        // Rigid cuirass: strongest compression, least forced cleavage/togetherness.
+        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 0.20F));
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.25F, -0.20F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.30F, -0.40F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.05F, 0.10F});
+        AddSliderToSet(set, Slider{"Breasts", -0.12F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.10F});
+        break;
+
+    case RefitClass::LightArmor:
+        // Light armor: moderate shaping, still less aggressive than old one-size ORefit.
+        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 0.55F));
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.15F, -0.10F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.20F, -0.25F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.15F, 0.20F});
+        AddSliderToSet(set, Slider{"Breasts", -0.07F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.12F});
+        break;
+
+    case RefitClass::Clothing:
+    default:
+        // Clothing/robes: closest to original ORefit, but toned down slightly.
+        AddSliderToSet(set, DeriveSlider(a_actor, "BreastCleavage", 0.85F));
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.10F, -0.05F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.15F, -0.25F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.25F, 0.30F});
+        AddSliderToSet(set, Slider{"Breasts", -0.05F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.15F});
+        break;
+    }
+
+    // Existing non-breast smoothing, kept mostly intact.
+    AddSliderToSet(set, DeriveSlider(a_actor, "ButtDimples", 0.0F));
+    AddSliderToSet(set, DeriveSlider(a_actor, "ButtUnderFold", 0.0F));
+    AddSliderToSet(set, Slider{"AppleCheeks", -0.05F});
+    AddSliderToSet(set, Slider{"Butt", -0.05F});
+
+    AddSliderToSet(set, DeriveSlider(a_actor, "Clavicle_v2", 0.0F));
+    AddSliderToSet(set, DeriveSlider(a_actor, "NavelEven", 1.0F));
+    AddSliderToSet(set, DeriveSlider(a_actor, "HipCarved", 0.0F));
+
+    if (setNippleSlidersRefitEnabled) {
+        // Heavier armor should hide nipples hardest; clothing is softer; light armor is in between.
+        const float nipBGoneTarget = a_refitClass == RefitClass::HeavyArmor ? 1.0F :
+                                     a_refitClass == RefitClass::LightArmor ? 0.85F :
+                                                                              0.70F;
+        const float areolaTarget = a_refitClass == RefitClass::HeavyArmor ? -0.50F :
+                                   a_refitClass == RefitClass::LightArmor ? -0.40F :
+                                                                            -0.30F;
+        const float nipplePerkTarget = a_refitClass == RefitClass::HeavyArmor ? -0.45F :
+                                       a_refitClass == RefitClass::LightArmor ? -0.35F :
+                                                                                -0.25F;
+
+        AddSliderToSet(set, DeriveSlider(a_actor, "NippleDip", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "NippleTip", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "NipplePuffy_v2", 0.0F));
+        AddSliderToSet(set, DeriveSlider(a_actor, "AreolaSize", areolaTarget));
+        AddSliderToSet(set, DeriveSlider(a_actor, "NipBGone", nipBGoneTarget));
+        AddSliderToSet(set, Slider{"NippleDistance", 0.05F, 0.08F});
+        AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.1F});
+        AddSliderToSet(set, DeriveSlider(a_actor, "NipplePerkManga", nipplePerkTarget));
+    }
+
+    return set;
+}
 
     Slider OBody::DeriveSlider(RE::Actor* a_actor, const char* a_morph, float a_target) const {
         return Slider{a_morph, a_target - GetMorph(a_actor, a_morph)};
