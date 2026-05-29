@@ -416,7 +416,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 {
     const auto& presetContainer{PresetContainer::GetInstance()};
     const bool isFemale = IsFemale(a_actor);
-    std::optional a_preset = std::nullopt;
+    std::optional<PresetManager::Preset> a_preset = std::nullopt;
     auto& jsonParser{Parser::JSONParser::GetInstance()};
 
     // Existing behavior: explicit outfit refit presets from JSON still have highest priority.
