@@ -784,28 +784,28 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
     case RefitClass::LightArmor:
         // Light armor: more structured than clothing, clearly less aggressive than heavy.
-        AddSliderToSet(set, Slider{"BreastSideShape", -0.04F});
-        AddSliderToSet(set, Slider{"BreastUnderDepth", -0.04F});
-        AddSliderToSet(set, Slider{"BreastCleavage", 0.12F});
-        AddSliderToSet(set, Slider{"BreastGravity2", -0.06F, -0.04F});
-        AddSliderToSet(set, Slider{"BreastTopSlope", -0.10F, -0.15F});
-        AddSliderToSet(set, Slider{"BreastsTogether", 0.16F, 0.20F});
-        AddSliderToSet(set, Slider{"Breasts", -0.035F});
-        AddSliderToSet(set, Slider{"BreastHeight", 0.08F});
+        AddSliderToSet(set, Slider{"BreastSideShape", -0.04F, -0.055F});
+        AddSliderToSet(set, Slider{"BreastUnderDepth", -0.04F, -0.055F});
+        AddSliderToSet(set, Slider{"BreastCleavage", 0.13F, 0.18F});
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.065F, -0.095F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.11F, -0.17F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.18F, 0.25F});
+        AddSliderToSet(set, Slider{"Breasts", -0.03F, -0.05F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.08F, 0.11F});
         break;
 
     case RefitClass::Clothing:
     default:
         // Clothing/robes: closest to nude. Mild fabric support only.
         // No full cancellation of breast/nipple shape here.
-        AddSliderToSet(set, Slider{"BreastSideShape", -0.015F});
-        AddSliderToSet(set, Slider{"BreastUnderDepth", -0.015F});
-        AddSliderToSet(set, Slider{"BreastCleavage", 0.04F});
-        AddSliderToSet(set, Slider{"BreastGravity2", -0.03F, -0.02F});
-        AddSliderToSet(set, Slider{"BreastTopSlope", -0.05F, -0.08F});
-        AddSliderToSet(set, Slider{"BreastsTogether", 0.08F, 0.10F});
-        AddSliderToSet(set, Slider{"Breasts", -0.015F});
-        AddSliderToSet(set, Slider{"BreastHeight", 0.04F});
+        AddSliderToSet(set, Slider{"BreastSideShape", -0.015F, -0.02F});
+        AddSliderToSet(set, Slider{"BreastUnderDepth", -0.015F, -0.02F});
+        AddSliderToSet(set, Slider{"BreastCleavage", 0.05F, 0.08F});
+        AddSliderToSet(set, Slider{"BreastGravity2", -0.035F, -0.055F});
+        AddSliderToSet(set, Slider{"BreastTopSlope", -0.055F, -0.09F});
+        AddSliderToSet(set, Slider{"BreastsTogether", 0.10F, 0.14F});
+        AddSliderToSet(set, Slider{"Breasts", -0.012F, -0.02F});
+        AddSliderToSet(set, Slider{"BreastHeight", 0.04F, 0.06F});
         break;
     }
 
@@ -844,27 +844,27 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
         case RefitClass::LightArmor:
             // Moderate suppression. Noticeable under armor, but not full heavy-armor cancellation.
-            AddSliderToSet(set, Slider{"NippleDip", -0.08F});
-            AddSliderToSet(set, Slider{"NippleTip", -0.08F});
-            AddSliderToSet(set, Slider{"NipplePuffy_v2", -0.08F});
-            AddSliderToSet(set, Slider{"AreolaSize", -0.12F});
-            AddSliderToSet(set, Slider{"NipBGone", 0.35F});
+            AddSliderToSet(set, Slider{"NippleDip", -0.085F});
+            AddSliderToSet(set, Slider{"NippleTip", -0.085F});
+            AddSliderToSet(set, Slider{"NipplePuffy_v2", -0.085F});
+            AddSliderToSet(set, Slider{"AreolaSize", -0.13F});
+            AddSliderToSet(set, Slider{"NipBGone", 0.38F});
             AddSliderToSet(set, Slider{"NippleDistance", 0.025F, 0.04F});
             AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.04F});
-            AddSliderToSet(set, Slider{"NipplePerkManga", -0.12F});
+            AddSliderToSet(set, Slider{"NipplePerkManga", -0.13F});
             break;
 
         case RefitClass::Clothing:
         default:
             // Clothing: barely different from nude. Small fabric softening only.
-            AddSliderToSet(set, Slider{"NippleDip", -0.02F});
-            AddSliderToSet(set, Slider{"NippleTip", -0.02F});
-            AddSliderToSet(set, Slider{"NipplePuffy_v2", -0.02F});
-            AddSliderToSet(set, Slider{"AreolaSize", -0.03F});
-            AddSliderToSet(set, Slider{"NipBGone", 0.08F});
+            AddSliderToSet(set, Slider{"NippleDip", -0.025F});
+            AddSliderToSet(set, Slider{"NippleTip", -0.025F});
+            AddSliderToSet(set, Slider{"NipplePuffy_v2", -0.025F});
+            AddSliderToSet(set, Slider{"AreolaSize", -0.035F});
+            AddSliderToSet(set, Slider{"NipBGone", 0.10F});
             AddSliderToSet(set, Slider{"NippleDistance", 0.01F, 0.015F});
-            AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.015F});
-            AddSliderToSet(set, Slider{"NipplePerkManga", -0.03F});
+            AddSliderToSet(set, Slider{"NippleDown", 0.0F, -0.018F});
+            AddSliderToSet(set, Slider{"NipplePerkManga", -0.04F});
             break;
         }
     }
