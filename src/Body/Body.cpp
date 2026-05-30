@@ -8,6 +8,7 @@
 #include <string>
 #include <rapidjson/document.h>
 #include <rapidjson/filereadstream.h>
+#include <vector>
 
 using namespace PresetManager;
 
@@ -770,23 +771,36 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
     PresetManager::SliderSet set;
 
-    // BEGIN Typed ORefit JSON v0.6
-    // Runtime-configurable ORefit. If Data/SKSE/Plugins/OBody_TypedORefit.json is present
-    // and contains a matching enabled profile, this replaces the hardcoded ORefit block below.
+    // BEGIN Typed ORefit JSONC v0.9
+    // Runtime-configurable ORefit.
+    //
+    // Config file lookup order:
+    // 1. Data/SKSE/Plugins/OBody_TypedORefit.jsonc  <-- preferred, supports comments
+    // 2. Data/SKSE/Plugins/OBody_TypedORefit.json   <-- legacy fallback
+    //
+    // JSONC means "JSON with comments". The parser accepts:
+    // - line comments like // this
+    // - block comments like /* this */
+    // - trailing commas
+    //
+    // Plain-English overview:
+    // 1. OBody checks the armor/clothing worn on the body/chest slot.
+    // 2. It decides the basic Skyrim class: nude, clothing, light armor, or heavy armor.
+    // 3. It checks whether that armor has special keywords listed in the config.
+    // 4. It combines the basic class + keyword tag into a profile name.
+    //    Example: Light Armor + Bikini/Bra keyword = lightArmorBra.
+    // 5. It applies the sliders from that profile.
     auto TryApplyTypedORefitJson = [&]() -> bool {
-        auto profileName = std::string{};
+        FILE* file = nullptr;
 
-        if (a_refitClass == RefitClass::HeavyArmor) profileName = "heavyArmor";
-        else if (a_refitClass == RefitClass::LightArmor) profileName = "lightArmor";
-        else if (a_refitClass == RefitClass::Clothing) profileName = "clothing";
-        else if (a_refitClass == RefitClass::Nude) profileName = "nude";
+        // Prefer .jsonc so users can use real comments in the config.
+        fopen_s(&file, "Data/SKSE/Plugins/OBody_TypedORefit.jsonc", "rb");
 
-        if (profileName.empty()) {
-            return false;
+        // Fallback to old .json name for compatibility.
+        if (!file) {
+            fopen_s(&file, "Data/SKSE/Plugins/OBody_TypedORefit.json", "rb");
         }
 
-        FILE* file = nullptr;
-        fopen_s(&file, "Data/SKSE/Plugins/OBody_TypedORefit.json", "rb");
         if (!file) {
             return false;
         }
@@ -794,7 +808,10 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         char readBuffer[65536];
         rapidjson::FileReadStream stream(file, readBuffer, sizeof(readBuffer));
         rapidjson::Document document;
-        document.ParseStream(stream);
+
+        // kParseCommentsFlag allows // and /* */ comments.
+        // kParseTrailingCommasFlag allows trailing commas after the final item.
+        document.ParseStream<rapidjson::kParseCommentsFlag | rapidjson::kParseTrailingCommasFlag>(stream);
         fclose(file);
 
         if (document.HasParseError() || !document.IsObject()) {
@@ -802,6 +819,130 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         }
 
         if (document.HasMember("enabled") && document["enabled"].IsBool() && !document["enabled"].GetBool()) {
+            return false;
+        }
+
+        auto baseClass = std::string{};
+        if (a_refitClass == RefitClass::HeavyArmor) {
+            baseClass = "heavyArmor";
+        } else if (a_refitClass == RefitClass::LightArmor) {
+            baseClass = "lightArmor";
+        } else if (a_refitClass == RefitClass::Clothing) {
+            baseClass = "clothing";
+        } else if (a_refitClass == RefitClass::Nude) {
+            baseClass = "nude";
+        }
+
+        auto profileName = baseClass;
+
+        if (!baseClass.empty() && document.HasMember("defaultProfileByArmorClass") && document["defaultProfileByArmorClass"].IsObject()) {
+            const auto& classMap = document["defaultProfileByArmorClass"];
+            if (classMap.HasMember(baseClass.c_str()) && classMap[baseClass.c_str()].IsString()) {
+                profileName = classMap[baseClass.c_str()].GetString();
+            }
+        }
+
+        const RE::TESObjectARMO* bodyArmor = nullptr;
+        const RE::TESObjectARMO* outerChest = nullptr;
+        const RE::TESObjectARMO* underChest = nullptr;
+        if (a_actor) {
+            using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
+            bodyArmor = a_actor->GetWornArmor(Slot::kBody);
+            outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
+            underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
+        }
+        const std::array<const RE::TESObjectARMO*, 3> wornChestItems{bodyArmor, outerChest, underChest};
+
+        auto wornArmorHasKeyword = [&](const char* keyword) -> bool {
+            if (!keyword) {
+                return false;
+            }
+
+            for (const auto* armor : wornChestItems) {
+                if (armor && armor->HasKeywordString(keyword)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        auto keywordGroupMatches = [&](const char* groupName) -> bool {
+            if (!groupName || !document.HasMember("keywordGroups") || !document["keywordGroups"].IsObject()) {
+                return false;
+            }
+
+            const auto& groups = document["keywordGroups"];
+            if (!groups.HasMember(groupName)) {
+                return false;
+            }
+
+            const auto& group = groups[groupName];
+
+            if (group.IsArray()) {
+                for (const auto& keyword : group.GetArray()) {
+                    if (keyword.IsString() && wornArmorHasKeyword(keyword.GetString())) {
+                        return true;
+                    }
+                }
+            }
+
+            if (group.IsObject() && group.HasMember("keywords") && group["keywords"].IsArray()) {
+                for (const auto& keyword : group["keywords"].GetArray()) {
+                    if (keyword.IsString() && wornArmorHasKeyword(keyword.GetString())) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        };
+
+        auto matchedTags = std::vector<std::string>{};
+        if (document.HasMember("keywordGroups") && document["keywordGroups"].IsObject()) {
+            const auto& groups = document["keywordGroups"];
+            for (auto it = groups.MemberBegin(); it != groups.MemberEnd(); ++it) {
+                if (it->name.IsString() && keywordGroupMatches(it->name.GetString())) {
+                    matchedTags.emplace_back(it->name.GetString());
+                }
+            }
+        }
+
+        auto hasMatchedTag = [&](const char* tag) -> bool {
+            if (!tag) {
+                return false;
+            }
+
+            for (const auto& matchedTag : matchedTags) {
+                if (matchedTag == tag) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        if (document.HasMember("profileRules") && document["profileRules"].IsArray()) {
+            for (const auto& rule : document["profileRules"].GetArray()) {
+                if (!rule.IsObject() ||
+                    !rule.HasMember("baseClass") || !rule["baseClass"].IsString() ||
+                    !rule.HasMember("tag") || !rule["tag"].IsString() ||
+                    !rule.HasMember("profile") || !rule["profile"].IsString()) {
+                    continue;
+                }
+
+                const auto ruleBaseClass = std::string{rule["baseClass"].GetString()};
+                const auto ruleTag = rule["tag"].GetString();
+
+                const auto baseMatches = ruleBaseClass == "*" || ruleBaseClass == baseClass;
+                if (baseMatches && hasMatchedTag(ruleTag)) {
+                    profileName = rule["profile"].GetString();
+                    break;
+                }
+            }
+        }
+
+        if (profileName.empty()) {
             return false;
         }
 
@@ -816,7 +957,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
         const auto& profile = profiles[profileName.c_str()];
         if (profile.HasMember("enabled") && profile["enabled"].IsBool() && !profile["enabled"].GetBool()) {
-            return true;  // explicitly enabled=false means no refit for this profile
+            return true;
         }
 
         if (!profile.HasMember("sliders") || !profile["sliders"].IsArray()) {
@@ -826,6 +967,13 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         for (const auto& slider : profile["sliders"].GetArray()) {
             if (!slider.IsObject() || !slider.HasMember("name") || !slider["name"].IsString()) {
                 continue;
+            }
+
+            if (slider.HasMember("mode") && slider["mode"].IsString()) {
+                const auto mode = std::string{slider["mode"].GetString()};
+                if (mode == "none" || mode == "disabled") {
+                    continue;
+                }
             }
 
             const auto name = std::string{slider["name"].GetString()};
@@ -871,7 +1019,8 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
     if (TryApplyTypedORefitJson()) {
         return set;
     }
-    // END Typed ORefit JSON v0.6
+    // END Typed ORefit JSONC v0.9
+
 
 
     if (a_refitClass == RefitClass::Nude) {
