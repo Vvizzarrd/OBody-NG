@@ -771,35 +771,32 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
     PresetManager::SliderSet set;
 
-    // BEGIN Typed ORefit JSONC v0.10
-    // Runtime-configurable typed ORefit.
-    //
-    // v0.10 goals:
-    // - Keep JSONC runtime editing from v0.9.
-    // - Respect original OBody ORefit exemption/masterlist logic.
-    // - Add debugging switches for quicker in-game testing.
+    // BEGIN Typed ORefit JSONC v0.9
+    // Runtime-configurable ORefit.
     //
     // Config file lookup order:
-    // 1. Data/SKSE/Plugins/OBody_TypedORefit.jsonc
-    // 2. Data/SKSE/Plugins/OBody_TypedORefit.json
-    using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
-
-    const RE::TESObjectARMO* bodyArmor = nullptr;
-    const RE::TESObjectARMO* outerChest = nullptr;
-    const RE::TESObjectARMO* underChest = nullptr;
-
-    if (a_actor) {
-        bodyArmor = a_actor->GetWornArmor(Slot::kBody);
-        outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
-        underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
-    }
-
-    const std::array<const RE::TESObjectARMO*, 3> wornChestItems{bodyArmor, outerChest, underChest};
-
+    // 1. Data/SKSE/Plugins/OBody_TypedORefit.jsonc  <-- preferred, supports comments
+    // 2. Data/SKSE/Plugins/OBody_TypedORefit.json   <-- legacy fallback
+    //
+    // JSONC means "JSON with comments". The parser accepts:
+    // - line comments like // this
+    // - block comments like /* this */
+    // - trailing commas
+    //
+    // Plain-English overview:
+    // 1. OBody checks the armor/clothing worn on the body/chest slot.
+    // 2. It decides the basic Skyrim class: nude, clothing, light armor, or heavy armor.
+    // 3. It checks whether that armor has special keywords listed in the config.
+    // 4. It combines the basic class + keyword tag into a profile name.
+    //    Example: Light Armor + Bikini/Bra keyword = lightArmorBra.
+    // 5. It applies the sliders from that profile.
     auto TryApplyTypedORefitJson = [&]() -> bool {
         FILE* file = nullptr;
 
+        // Prefer .jsonc so users can use real comments in the config.
         fopen_s(&file, "Data/SKSE/Plugins/OBody_TypedORefit.jsonc", "rb");
+
+        // Fallback to old .json name for compatibility.
         if (!file) {
             fopen_s(&file, "Data/SKSE/Plugins/OBody_TypedORefit.json", "rb");
         }
@@ -811,6 +808,9 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         char readBuffer[65536];
         rapidjson::FileReadStream stream(file, readBuffer, sizeof(readBuffer));
         rapidjson::Document document;
+
+        // kParseCommentsFlag allows // and /* */ comments.
+        // kParseTrailingCommasFlag allows trailing commas after the final item.
         document.ParseStream<rapidjson::kParseCommentsFlag | rapidjson::kParseTrailingCommasFlag>(stream);
         fclose(file);
 
@@ -820,66 +820,6 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
         if (document.HasMember("enabled") && document["enabled"].IsBool() && !document["enabled"].GetBool()) {
             return false;
-        }
-
-        // Compatibility guard:
-        // Original OBody uses OBody_presetDistributionConfig.json to blacklist outfits from ORefit.
-        // v0.9 generated typed sliders too early in some cases, so v0.10 checks the original blacklist again.
-        //
-        // Default mode mirrors original intent:
-        // - if there is at least one non-blacklisted relevant chest/body item, ORefit may continue;
-        // - if every relevant chest/body item is blacklisted and no force-refit item is equipped, return an empty set.
-        if (document.HasMember("compatibility") && document["compatibility"].IsObject()) {
-            const auto& compatibility = document["compatibility"];
-            const auto respectBlacklist =
-                !compatibility.HasMember("respectOriginalORefitBlacklist") ||
-                !compatibility["respectOriginalORefitBlacklist"].IsBool() ||
-                compatibility["respectOriginalORefitBlacklist"].GetBool();
-
-            if (respectBlacklist && a_actor) {
-                auto& originalJsonParser = Parser::JSONParser::GetInstance();
-
-                bool hasRelevantItem = false;
-                bool hasBlacklistedRelevantItem = false;
-                bool hasNonBlacklistedRelevantItem = false;
-
-                for (const auto* armor : wornChestItems) {
-                    if (!armor) {
-                        continue;
-                    }
-
-                    hasRelevantItem = true;
-
-                    if (originalJsonParser.IsOutfitBlacklisted(*armor)) {
-                        hasBlacklistedRelevantItem = true;
-                    } else {
-                        hasNonBlacklistedRelevantItem = true;
-                    }
-                }
-
-                auto blacklistMode = std::string{"allRelevantItemsBlacklisted"};
-                if (compatibility.HasMember("blacklistMode") && compatibility["blacklistMode"].IsString()) {
-                    blacklistMode = compatibility["blacklistMode"].GetString();
-                }
-
-                const auto forceRefitEquipped = originalJsonParser.IsAnyForceRefitItemEquipped(a_actor, false, nullptr);
-
-                const auto shouldSuppressForAnyBlacklisted =
-                    blacklistMode == "anyBlacklisted" && hasBlacklistedRelevantItem && !forceRefitEquipped;
-
-                const auto shouldSuppressForAllBlacklisted =
-                    blacklistMode != "anyBlacklisted" &&
-                    hasRelevantItem &&
-                    hasBlacklistedRelevantItem &&
-                    !hasNonBlacklistedRelevantItem &&
-                    !forceRefitEquipped;
-
-                if (shouldSuppressForAnyBlacklisted || shouldSuppressForAllBlacklisted) {
-                    // Make the no-refit state explicit. ApplyClothePreset will receive an empty slider set after this.
-                    morphInterface->ClearBodyMorphKeys(a_actor, "OClothe");
-                    return true;
-                }
-            }
         }
 
         auto baseClass = std::string{};
@@ -902,21 +842,16 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
             }
         }
 
-        auto debugDisableKeywordGroups = false;
-        if (document.HasMember("debug") && document["debug"].IsObject()) {
-            const auto& debug = document["debug"];
-
-            if (debug.HasMember("forceProfile") && debug["forceProfile"].IsString()) {
-                const auto forcedProfile = std::string{debug["forceProfile"].GetString()};
-                if (!forcedProfile.empty()) {
-                    profileName = forcedProfile;
-                }
-            }
-
-            if (debug.HasMember("disableKeywordGroups") && debug["disableKeywordGroups"].IsBool()) {
-                debugDisableKeywordGroups = debug["disableKeywordGroups"].GetBool();
-            }
+        const RE::TESObjectARMO* bodyArmor = nullptr;
+        const RE::TESObjectARMO* outerChest = nullptr;
+        const RE::TESObjectARMO* underChest = nullptr;
+        if (a_actor) {
+            using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
+            bodyArmor = a_actor->GetWornArmor(Slot::kBody);
+            outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
+            underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
         }
+        const std::array<const RE::TESObjectARMO*, 3> wornChestItems{bodyArmor, outerChest, underChest};
 
         auto wornArmorHasKeyword = [&](const char* keyword) -> bool {
             if (!keyword) {
@@ -933,7 +868,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         };
 
         auto keywordGroupMatches = [&](const char* groupName) -> bool {
-            if (!groupName || debugDisableKeywordGroups || !document.HasMember("keywordGroups") || !document["keywordGroups"].IsObject()) {
+            if (!groupName || !document.HasMember("keywordGroups") || !document["keywordGroups"].IsObject()) {
                 return false;
             }
 
@@ -964,7 +899,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
         };
 
         auto matchedTags = std::vector<std::string>{};
-        if (!debugDisableKeywordGroups && document.HasMember("keywordGroups") && document["keywordGroups"].IsObject()) {
+        if (document.HasMember("keywordGroups") && document["keywordGroups"].IsObject()) {
             const auto& groups = document["keywordGroups"];
             for (auto it = groups.MemberBegin(); it != groups.MemberEnd(); ++it) {
                 if (it->name.IsString() && keywordGroupMatches(it->name.GetString())) {
@@ -987,7 +922,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
             return false;
         };
 
-        if (!debugDisableKeywordGroups && document.HasMember("profileRules") && document["profileRules"].IsArray()) {
+        if (document.HasMember("profileRules") && document["profileRules"].IsArray()) {
             for (const auto& rule : document["profileRules"].GetArray()) {
                 if (!rule.IsObject() ||
                     !rule.HasMember("baseClass") || !rule["baseClass"].IsString() ||
@@ -1022,7 +957,6 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
         const auto& profile = profiles[profileName.c_str()];
         if (profile.HasMember("enabled") && profile["enabled"].IsBool() && !profile["enabled"].GetBool()) {
-            morphInterface->ClearBodyMorphKeys(a_actor, "OClothe");
             return true;
         }
 
@@ -1085,8 +1019,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
     if (TryApplyTypedORefitJson()) {
         return set;
     }
-    // END Typed ORefit JSONC v0.10
-
+    // END Typed ORefit JSONC v0.9
 
 
 
