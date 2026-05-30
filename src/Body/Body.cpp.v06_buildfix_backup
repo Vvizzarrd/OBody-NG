@@ -767,9 +767,6 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
     PresetManager::SliderSet OBody::GenerateClotheSliders(RE::Actor* a_actor, const RefitClass a_refitClass) const
 {
-
-    PresetManager::SliderSet set;
-
     // BEGIN Typed ORefit JSON v0.6
     // Runtime-configurable ORefit. If Data/SKSE/Plugins/OBody_TypedORefit.json is present
     // and contains a matching enabled profile, this replaces the hardcoded ORefit block below.
@@ -778,7 +775,6 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
         if (a_refitClass == RefitClass::HeavyArmor) profileName = "heavyArmor";
         else if (a_refitClass == RefitClass::LightArmor) profileName = "lightArmor";
-        else if (a_refitClass == RefitClass::Clothing) profileName = "clothing";
         else if (a_refitClass == RefitClass::Nude) profileName = "nude";
 
         if (profileName.empty()) {
@@ -845,22 +841,17 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
             if (slider.HasMember("random") && slider["random"].IsArray() && slider["random"].Size() == 2 &&
                 slider["random"][0].IsNumber() && slider["random"][1].IsNumber()) {
-                AddSliderToSet(set, Slider{name.c_str(), stl::random(slider["random"][0].GetFloat(), slider["random"][1].GetFloat())});
-                continue;
-            }
-
-            if (hasNumber("min") && hasNumber("max")) {
-                AddSliderToSet(set, Slider{name.c_str(), getNumber("min", 0.0F), getNumber("max", 0.0F)});
+                AddSliderToSet(set, Slider{name, stl::random(slider["random"][0].GetFloat(), slider["random"][1].GetFloat())});
                 continue;
             }
 
             if (hasNumber("low") && hasNumber("high")) {
-                AddSliderToSet(set, Slider{name.c_str(), getNumber("low", 0.0F), getNumber("high", 0.0F)});
+                AddSliderToSet(set, Slider{name, getNumber("low", 0.0F), getNumber("high", 0.0F)});
                 continue;
             }
 
             if (hasNumber("value")) {
-                AddSliderToSet(set, Slider{name.c_str(), getNumber("value", 0.0F)});
+                AddSliderToSet(set, Slider{name, getNumber("value", 0.0F)});
                 continue;
             }
         }
@@ -873,6 +864,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
     }
     // END Typed ORefit JSON v0.6
 
+    PresetManager::SliderSet set;
 
     if (a_refitClass == RefitClass::Nude) {
         return set;
