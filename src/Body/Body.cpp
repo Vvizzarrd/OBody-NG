@@ -4,6 +4,11 @@
 #include "STL.h"
 #include <array>
 
+#include <cstdio>
+#include <string>
+#include <rapidjson/document.h>
+#include <rapidjson/filereadstream.h>
+
 using namespace PresetManager;
 
 Body::OBody Body::OBody::instance_;
@@ -762,6 +767,103 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
     PresetManager::SliderSet OBody::GenerateClotheSliders(RE::Actor* a_actor, const RefitClass a_refitClass) const
 {
+    // BEGIN Typed ORefit JSON v0.6
+    // Runtime-configurable ORefit. If Data/SKSE/Plugins/OBody_TypedORefit.json is present
+    // and contains a matching enabled profile, this replaces the hardcoded ORefit block below.
+    auto TryApplyTypedORefitJson = [&]() -> bool {
+        auto profileName = std::string{};
+
+        if (a_refitClass == RefitClass::HeavyArmor) profileName = "heavyArmor";
+        else if (a_refitClass == RefitClass::LightArmor) profileName = "lightArmor";
+        else if (a_refitClass == RefitClass::Nude) profileName = "nude";
+
+        if (profileName.empty()) {
+            return false;
+        }
+
+        FILE* file = nullptr;
+        fopen_s(&file, "Data/SKSE/Plugins/OBody_TypedORefit.json", "rb");
+        if (!file) {
+            return false;
+        }
+
+        char readBuffer[65536];
+        rapidjson::FileReadStream stream(file, readBuffer, sizeof(readBuffer));
+        rapidjson::Document document;
+        document.ParseStream(stream);
+        fclose(file);
+
+        if (document.HasParseError() || !document.IsObject()) {
+            return false;
+        }
+
+        if (document.HasMember("enabled") && document["enabled"].IsBool() && !document["enabled"].GetBool()) {
+            return false;
+        }
+
+        if (!document.HasMember("profiles") || !document["profiles"].IsObject()) {
+            return false;
+        }
+
+        const auto& profiles = document["profiles"];
+        if (!profiles.HasMember(profileName.c_str()) || !profiles[profileName.c_str()].IsObject()) {
+            return false;
+        }
+
+        const auto& profile = profiles[profileName.c_str()];
+        if (profile.HasMember("enabled") && profile["enabled"].IsBool() && !profile["enabled"].GetBool()) {
+            return true;  // explicitly enabled=false means no refit for this profile
+        }
+
+        if (!profile.HasMember("sliders") || !profile["sliders"].IsArray()) {
+            return false;
+        }
+
+        for (const auto& slider : profile["sliders"].GetArray()) {
+            if (!slider.IsObject() || !slider.HasMember("name") || !slider["name"].IsString()) {
+                continue;
+            }
+
+            const auto name = std::string{slider["name"].GetString()};
+
+            auto hasNumber = [&](const char* key) {
+                return slider.HasMember(key) && slider[key].IsNumber();
+            };
+
+            auto getNumber = [&](const char* key, float fallback) {
+                return hasNumber(key) ? slider[key].GetFloat() : fallback;
+            };
+
+            if (hasNumber("target")) {
+                AddSliderToSet(set, DeriveSlider(a_actor, name.c_str(), getNumber("target", 0.0F)));
+                continue;
+            }
+
+            if (slider.HasMember("random") && slider["random"].IsArray() && slider["random"].Size() == 2 &&
+                slider["random"][0].IsNumber() && slider["random"][1].IsNumber()) {
+                AddSliderToSet(set, Slider{name, stl::random(slider["random"][0].GetFloat(), slider["random"][1].GetFloat())});
+                continue;
+            }
+
+            if (hasNumber("low") && hasNumber("high")) {
+                AddSliderToSet(set, Slider{name, getNumber("low", 0.0F), getNumber("high", 0.0F)});
+                continue;
+            }
+
+            if (hasNumber("value")) {
+                AddSliderToSet(set, Slider{name, getNumber("value", 0.0F)});
+                continue;
+            }
+        }
+
+        return true;
+    };
+
+    if (TryApplyTypedORefitJson()) {
+        return set;
+    }
+    // END Typed ORefit JSON v0.6
+
     PresetManager::SliderSet set;
 
     if (a_refitClass == RefitClass::Nude) {
