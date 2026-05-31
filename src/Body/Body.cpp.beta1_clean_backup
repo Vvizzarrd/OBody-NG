@@ -121,49 +121,13 @@ namespace Body {
             OnActorNaked.SendEvent(a_actor);
         }
 
-    // BEGIN Typed ORefit Beta 1 re-equip recalculation
-    // Original OBody only applied ORefit when going from nude -> clothed
-    // and removed it when going from clothed -> nude.
-    //
-    // That was fine when every outfit used the same generic ORefit values.
-    // Typed ORefit is different: clothing, light armor, and heavy armor can
-    // have different generated fallback values.
-    //
-    // So when the actor is already clothed and a body/chest armor event happens,
-    // recalculate OClothe instead of leaving the old clothing profile in place.
-    auto equippedArmorTouchesORefitSlots = [&]() -> bool {
-        using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
-
-        if (!a_actor || !a_equippedArmor) {
-            return false;
-        }
-
-        const auto* body = a_actor->GetWornArmor(Slot::kBody);
-        const auto* outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
-        const auto* underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
-
-        return body == a_equippedArmor || outerChest == a_equippedArmor || underChest == a_equippedArmor;
-    };
-
-    if (clotheActive && naked) {
-        logger::info("Removing clothed preset to actor {}", a_actor->GetName());
-        RemoveClothePreset(a_actor);
-        ApplyMorphs(a_actor, true);
-        orefitIsApplied = false;
-    } else if (!clotheActive && !naked && setRefit) {
-        logger::info("Applying clothed preset to actor {}", a_actor->GetName());
-        ApplyClothePreset(a_actor);
-        ApplyMorphs(a_actor, true);
-        orefitIsApplied = true;
-    } else if (clotheActive && !naked && setRefit && equippedArmorTouchesORefitSlots()) {
-        logger::info("Reapplying clothed preset to actor {} after body/chest equipment change", a_actor->GetName());
-        RemoveClothePreset(a_actor);
-        ApplyClothePreset(a_actor);
-        ApplyMorphs(a_actor, true);
-        orefitIsApplied = true;
-    }
-    // END Typed ORefit Beta 1 re-equip recalculation
-", a_actor->GetName());
+        if (clotheActive && naked) {
+            logger::info("Removing clothed preset to actor {}", a_actor->GetName());
+            RemoveClothePreset(a_actor);
+            ApplyMorphs(a_actor, true);
+            orefitIsApplied = false;
+        } else if (!clotheActive && !naked && setRefit) {
+            logger::info("Applying clothed preset to actor {}", a_actor->GetName());
             ApplyClothePreset(a_actor);
             ApplyMorphs(a_actor, true);
             orefitIsApplied = true;
@@ -807,24 +771,31 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
     PresetManager::SliderSet set;
 
-    // BEGIN Typed ORefit JSONC Beta 1 clean + recalc
-    // Clean armor-class-only Typed ORefit.
+    // BEGIN Typed ORefit JSONC v0.10
+    // Runtime-configurable typed ORefit.
     //
-    // This intentionally does NOT do:
-    // - keyword matching
-    // - custom blacklist logic
-    // - custom force-refit logic
-    // - slot scanning
-    // - bra/loose special routing
+    // v0.10 goals:
+    // - Keep JSONC runtime editing from v0.9.
+    // - Respect original OBody ORefit exemption/masterlist logic.
+    // - Add debugging switches for quicker in-game testing.
     //
-    // Original OBody remains responsible for:
-    // - whether ORefit should run
-    // - blacklist/exemption behavior
-    // - force-refit behavior
-    // - outfit-specific refit presets
-    //
-    // This block only replaces the generated fallback slider values
-    // when original OBody has already reached GenerateClotheSliders().
+    // Config file lookup order:
+    // 1. Data/SKSE/Plugins/OBody_TypedORefit.jsonc
+    // 2. Data/SKSE/Plugins/OBody_TypedORefit.json
+    using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
+
+    const RE::TESObjectARMO* bodyArmor = nullptr;
+    const RE::TESObjectARMO* outerChest = nullptr;
+    const RE::TESObjectARMO* underChest = nullptr;
+
+    if (a_actor) {
+        bodyArmor = a_actor->GetWornArmor(Slot::kBody);
+        outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
+        underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
+    }
+
+    const std::array<const RE::TESObjectARMO*, 3> wornChestItems{bodyArmor, outerChest, underChest};
+
     auto TryApplyTypedORefitJson = [&]() -> bool {
         FILE* file = nullptr;
 
@@ -851,16 +822,189 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
             return false;
         }
 
-        auto profileName = std::string{};
+        // Compatibility guard:
+        // Original OBody uses OBody_presetDistributionConfig.json to blacklist outfits from ORefit.
+        // v0.9 generated typed sliders too early in some cases, so v0.10 checks the original blacklist again.
+        //
+        // Default mode mirrors original intent:
+        // - if there is at least one non-blacklisted relevant chest/body item, ORefit may continue;
+        // - if every relevant chest/body item is blacklisted and no force-refit item is equipped, return an empty set.
+        if (document.HasMember("compatibility") && document["compatibility"].IsObject()) {
+            const auto& compatibility = document["compatibility"];
+            const auto respectBlacklist =
+                !compatibility.HasMember("respectOriginalORefitBlacklist") ||
+                !compatibility["respectOriginalORefitBlacklist"].IsBool() ||
+                compatibility["respectOriginalORefitBlacklist"].GetBool();
 
+            if (respectBlacklist && a_actor) {
+                auto& originalJsonParser = Parser::JSONParser::GetInstance();
+
+                bool hasRelevantItem = false;
+                bool hasBlacklistedRelevantItem = false;
+                bool hasNonBlacklistedRelevantItem = false;
+
+                for (const auto* armor : wornChestItems) {
+                    if (!armor) {
+                        continue;
+                    }
+
+                    hasRelevantItem = true;
+
+                    if (originalJsonParser.IsOutfitBlacklisted(*armor)) {
+                        hasBlacklistedRelevantItem = true;
+                    } else {
+                        hasNonBlacklistedRelevantItem = true;
+                    }
+                }
+
+                auto blacklistMode = std::string{"allRelevantItemsBlacklisted"};
+                if (compatibility.HasMember("blacklistMode") && compatibility["blacklistMode"].IsString()) {
+                    blacklistMode = compatibility["blacklistMode"].GetString();
+                }
+
+                const auto forceRefitEquipped = originalJsonParser.IsAnyForceRefitItemEquipped(a_actor, false, nullptr);
+
+                const auto shouldSuppressForAnyBlacklisted =
+                    blacklistMode == "anyBlacklisted" && hasBlacklistedRelevantItem && !forceRefitEquipped;
+
+                const auto shouldSuppressForAllBlacklisted =
+                    blacklistMode != "anyBlacklisted" &&
+                    hasRelevantItem &&
+                    hasBlacklistedRelevantItem &&
+                    !hasNonBlacklistedRelevantItem &&
+                    !forceRefitEquipped;
+
+                if (shouldSuppressForAnyBlacklisted || shouldSuppressForAllBlacklisted) {
+                    // Make the no-refit state explicit. ApplyClothePreset will receive an empty slider set after this.
+                    morphInterface->ClearBodyMorphKeys(a_actor, "OClothe");
+                    return true;
+                }
+            }
+        }
+
+        auto baseClass = std::string{};
         if (a_refitClass == RefitClass::HeavyArmor) {
-            profileName = "heavyArmor";
+            baseClass = "heavyArmor";
         } else if (a_refitClass == RefitClass::LightArmor) {
-            profileName = "lightArmor";
+            baseClass = "lightArmor";
         } else if (a_refitClass == RefitClass::Clothing) {
-            profileName = "clothing";
+            baseClass = "clothing";
         } else if (a_refitClass == RefitClass::Nude) {
-            profileName = "nude";
+            baseClass = "nude";
+        }
+
+        auto profileName = baseClass;
+
+        if (!baseClass.empty() && document.HasMember("defaultProfileByArmorClass") && document["defaultProfileByArmorClass"].IsObject()) {
+            const auto& classMap = document["defaultProfileByArmorClass"];
+            if (classMap.HasMember(baseClass.c_str()) && classMap[baseClass.c_str()].IsString()) {
+                profileName = classMap[baseClass.c_str()].GetString();
+            }
+        }
+
+        auto debugDisableKeywordGroups = false;
+        if (document.HasMember("debug") && document["debug"].IsObject()) {
+            const auto& debug = document["debug"];
+
+            if (debug.HasMember("forceProfile") && debug["forceProfile"].IsString()) {
+                const auto forcedProfile = std::string{debug["forceProfile"].GetString()};
+                if (!forcedProfile.empty()) {
+                    profileName = forcedProfile;
+                }
+            }
+
+            if (debug.HasMember("disableKeywordGroups") && debug["disableKeywordGroups"].IsBool()) {
+                debugDisableKeywordGroups = debug["disableKeywordGroups"].GetBool();
+            }
+        }
+
+        auto wornArmorHasKeyword = [&](const char* keyword) -> bool {
+            if (!keyword) {
+                return false;
+            }
+
+            for (const auto* armor : wornChestItems) {
+                if (armor && armor->HasKeywordString(keyword)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        auto keywordGroupMatches = [&](const char* groupName) -> bool {
+            if (!groupName || debugDisableKeywordGroups || !document.HasMember("keywordGroups") || !document["keywordGroups"].IsObject()) {
+                return false;
+            }
+
+            const auto& groups = document["keywordGroups"];
+            if (!groups.HasMember(groupName)) {
+                return false;
+            }
+
+            const auto& group = groups[groupName];
+
+            if (group.IsArray()) {
+                for (const auto& keyword : group.GetArray()) {
+                    if (keyword.IsString() && wornArmorHasKeyword(keyword.GetString())) {
+                        return true;
+                    }
+                }
+            }
+
+            if (group.IsObject() && group.HasMember("keywords") && group["keywords"].IsArray()) {
+                for (const auto& keyword : group["keywords"].GetArray()) {
+                    if (keyword.IsString() && wornArmorHasKeyword(keyword.GetString())) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        };
+
+        auto matchedTags = std::vector<std::string>{};
+        if (!debugDisableKeywordGroups && document.HasMember("keywordGroups") && document["keywordGroups"].IsObject()) {
+            const auto& groups = document["keywordGroups"];
+            for (auto it = groups.MemberBegin(); it != groups.MemberEnd(); ++it) {
+                if (it->name.IsString() && keywordGroupMatches(it->name.GetString())) {
+                    matchedTags.emplace_back(it->name.GetString());
+                }
+            }
+        }
+
+        auto hasMatchedTag = [&](const char* tag) -> bool {
+            if (!tag) {
+                return false;
+            }
+
+            for (const auto& matchedTag : matchedTags) {
+                if (matchedTag == tag) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        if (!debugDisableKeywordGroups && document.HasMember("profileRules") && document["profileRules"].IsArray()) {
+            for (const auto& rule : document["profileRules"].GetArray()) {
+                if (!rule.IsObject() ||
+                    !rule.HasMember("baseClass") || !rule["baseClass"].IsString() ||
+                    !rule.HasMember("tag") || !rule["tag"].IsString() ||
+                    !rule.HasMember("profile") || !rule["profile"].IsString()) {
+                    continue;
+                }
+
+                const auto ruleBaseClass = std::string{rule["baseClass"].GetString()};
+                const auto ruleTag = rule["tag"].GetString();
+
+                const auto baseMatches = ruleBaseClass == "*" || ruleBaseClass == baseClass;
+                if (baseMatches && hasMatchedTag(ruleTag)) {
+                    profileName = rule["profile"].GetString();
+                    break;
+                }
+            }
         }
 
         if (profileName.empty()) {
@@ -878,6 +1022,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
 
         const auto& profile = profiles[profileName.c_str()];
         if (profile.HasMember("enabled") && profile["enabled"].IsBool() && !profile["enabled"].GetBool()) {
+            morphInterface->ClearBodyMorphKeys(a_actor, "OClothe");
             return true;
         }
 
@@ -940,8 +1085,7 @@ void OBody::ApplyClothePreset(RE::Actor* a_actor) const
     if (TryApplyTypedORefitJson()) {
         return set;
     }
-    // END Typed ORefit JSONC Beta 1 clean + recalc
-
+    // END Typed ORefit JSONC v0.10
 
 
 
