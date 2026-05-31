@@ -86,41 +86,51 @@ namespace Body {
         }
     }
 
-    void OBody::ProcessActorEquipEvent(RE::Actor* a_actor, const bool a_removingArmor, const RE::TESForm* a_equippedArmor) const
-{
-    const bool isProcessed = IsProcessed(a_actor);
-    const bool isBlacklisted = IsBlacklisted(a_actor);
-    const bool clotheActive = IsClotheActive(a_actor);
-    const bool naked = IsNaked(a_actor, a_removingArmor, a_equippedArmor);
-    bool orefitIsApplied = clotheActive;
-    bool female;
+    void OBody::ProcessActorEquipEvent(RE::Actor* a_actor, const bool a_removingArmor,
+                                       const RE::TESForm* a_equippedArmor) const {
+        const bool isProcessed = IsProcessed(a_actor);
+        const bool isBlacklisted = IsBlacklisted(a_actor);
+        const bool clotheActive = IsClotheActive(a_actor);
+        const bool naked = IsNaked(a_actor, a_removingArmor, a_equippedArmor);
+        bool orefitIsApplied = clotheActive;
+        bool female;
 
-    if (!isProcessed | isBlacklisted) {
-        goto notifyNativeEventListeners;
-    }
+        if (!isProcessed | isBlacklisted) goto notifyNativeEventListeners;
 
-    if (IsRemovingClothes(a_actor, a_removingArmor, a_equippedArmor)) {
-        OnActorRemovingClothes.SendEvent(a_actor);
-    }
+        if (IsRemovingClothes(a_actor, a_removingArmor, a_equippedArmor)) {
+            OnActorRemovingClothes.SendEvent(a_actor);
+        }
 
-    // if ORefit is disabled and actor has ORefit morphs, clear them right away.
-    if (!setRefit & clotheActive) {
-        RemoveClothePreset(a_actor);
-        ApplyMorphs(a_actor, true);
-        orefitIsApplied = false;
-        goto notifyNativeEventListeners;
-    }
+        // if ORefit is disabled and actor has ORefit morphs, clear them right away.
+        if (!setRefit & clotheActive) {
+            RemoveClothePreset(a_actor);
+            ApplyMorphs(a_actor, true);
+            orefitIsApplied = false;
+            goto notifyNativeEventListeners;
+        }
 
-    female = IsFemale(a_actor);
-    if (const auto& presetContainer{PresetManager::PresetContainer::GetInstance()}; (female && presetContainer.femalePresets.empty()) || !female && presetContainer.malePresets.empty()) {
-        goto notifyNativeEventListeners;
-    }
+        female = IsFemale(a_actor);
 
-    if (!naked && a_removingArmor) {
-        // Fires when removing their armor
-        OnActorNaked.SendEvent(a_actor);
-    }
+        if (const auto& presetContainer{PresetManager::PresetContainer::GetInstance()};
+            (female && presetContainer.femalePresets.empty()) || !female && presetContainer.malePresets.empty()) {
+            goto notifyNativeEventListeners;
+        }
 
+        if (!naked && a_removingArmor) {
+            // Fires when removing their armor
+            OnActorNaked.SendEvent(a_actor);
+        }
+
+    // BEGIN Typed ORefit Beta 1 re-equip recalculation
+    // Original OBody only applied ORefit when going from nude -> clothed
+    // and removed it when going from clothed -> nude.
+    //
+    // That was fine when every outfit used the same generic ORefit values.
+    // Typed ORefit is different: clothing, light armor, and heavy armor can
+    // have different generated fallback values.
+    //
+    // So when the actor is already clothed and a body/chest armor event happens,
+    // recalculate OClothe instead of leaving the old clothing profile in place.
     auto equippedArmorTouchesORefitSlots = [&]() -> bool {
         using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
 
@@ -152,38 +162,44 @@ namespace Body {
         ApplyMorphs(a_actor, true);
         orefitIsApplied = true;
     }
+    // END Typed ORefit Beta 1 re-equip recalculation
+", a_actor->GetName());
+            ApplyClothePreset(a_actor);
+            ApplyMorphs(a_actor, true);
+            orefitIsApplied = true;
+        }
+    notifyNativeEventListeners:
+        // It's particularly important that we avoid sending events recursively for this event,
+        // because if an event-listener equips or unequips armour in response to it it can
+        // easily cause an infinite loop of `TESEquipEvent`s, which would freeze the game
+        // until it crashes from a stack overflow.
+        SendActorChangeEvent(
+            a_actor,
+            [&] {
+                using Event = ::OBody::API::IActorChangeEventListener;
 
-notifyNativeEventListeners:
-    // It's particularly important that we avoid sending events recursively for this event,
-    // because if an event-listener equips or unequips armour in response to it it can
-    // easily cause an infinite loop of `TESEquipEvent`s, which would freeze the game
-    // until it crashes from a stack overflow.
-    SendActorChangeEvent(
-        a_actor,
-        [&] {
-            using Event = ::OBody::API::IActorChangeEventListener;
-            Event::OnActorClothingUpdate::Payload payload{nullptr, a_equippedArmor};
-            Event::OnActorClothingUpdate::Flags flags{};
-            static_assert(Event::OnActorClothingUpdate::Flags::IsClothed == (1 << 0));
-            static_assert(Event::OnActorClothingUpdate::Flags::IsORefitApplied == (1 << 1));
-            static_assert(Event::OnActorClothingUpdate::Flags::IsORefitEnabled == (1 << 2));
-            static_assert(Event::OnActorClothingUpdate::Flags::IsProcessed == (1 << 3));
-            static_assert(Event::OnActorClothingUpdate::Flags::IsBlacklisted == (1 << 4));
-            static_assert(Event::OnActorClothingUpdate::Flags::ActorIsEquipping == (1 << 5));
+                Event::OnActorClothingUpdate::Payload payload{nullptr, a_equippedArmor};
 
-            flags = static_cast(flags | uint64_t(!naked));
-            flags = static_cast(flags | (uint64_t(orefitIsApplied) << 1));
-            flags = static_cast(flags | (uint64_t(setRefit) << 2));
-            flags = static_cast(flags | (uint64_t(isProcessed) << 3));
-            flags = static_cast(flags | (uint64_t(isBlacklisted) << 4));
-            flags = static_cast(flags | (uint64_t(!a_removingArmor) << 5));
-            return std::make_pair(flags, payload);
-        },
-        [](auto listener, auto actor, auto&& args) {
-            listener->OnActorClothingUpdate(actor, args.first, args.second);
-        });
-}
+                Event::OnActorClothingUpdate::Flags flags{};
+                static_assert(Event::OnActorClothingUpdate::Flags::IsClothed == (1 << 0));
+                static_assert(Event::OnActorClothingUpdate::Flags::IsORefitApplied == (1 << 1));
+                static_assert(Event::OnActorClothingUpdate::Flags::IsORefitEnabled == (1 << 2));
+                static_assert(Event::OnActorClothingUpdate::Flags::IsProcessed == (1 << 3));
+                static_assert(Event::OnActorClothingUpdate::Flags::IsBlacklisted == (1 << 4));
+                static_assert(Event::OnActorClothingUpdate::Flags::ActorIsEquipping == (1 << 5));
+                flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | uint64_t(!naked));
+                flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(orefitIsApplied) << 1));
+                flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(setRefit) << 2));
+                flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(isProcessed) << 3));
+                flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(isBlacklisted) << 4));
+                flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(!a_removingArmor) << 5));
 
+                return std::make_pair(flags, payload);
+            },
+            [](auto listener, auto actor, auto&& args) {
+                listener->OnActorClothingUpdate(actor, args.first, args.second);
+            });
+    }
 
     void OBody::GenerateActorBody(RE::Actor* a_actor, ::OBody::API::IPluginInterface* responsibleInterface) const {
         // The main function of OBody NG
