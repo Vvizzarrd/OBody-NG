@@ -95,26 +95,6 @@ namespace Body {
     bool orefitIsApplied = clotheActive;
     bool female;
 
-    // Typed ORefit Beta 1:
-    // Original OBody only recalculated ORefit when the actor moved between
-    // "nude" and "clothed". That can leave stale clothing/light/heavy values
-    // active when swapping directly between body/chest outfits.
-    //
-    // Keep this as a simple bool declared before any goto. A lambda declared
-    // later in the function would be skipped by the existing goto statements,
-    // which MSVC correctly rejects.
-    bool equippedArmorTouchesORefitSlots = false;
-    if (a_actor && a_equippedArmor) {
-        const auto* bodyArmor = a_actor->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kBody);
-        const auto* outerChestArmor = a_actor->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kModChestPrimary);
-        const auto* underChestArmor = a_actor->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kModChestSecondary);
-
-        equippedArmorTouchesORefitSlots =
-            bodyArmor == a_equippedArmor ||
-            outerChestArmor == a_equippedArmor ||
-            underChestArmor == a_equippedArmor;
-    }
-
     if (!isProcessed | isBlacklisted) {
         goto notifyNativeEventListeners;
     }
@@ -141,6 +121,20 @@ namespace Body {
         OnActorNaked.SendEvent(a_actor);
     }
 
+    auto equippedArmorTouchesORefitSlots = [&]() -> bool {
+        using Slot = RE::BGSBipedObjectForm::BipedObjectSlot;
+
+        if (!a_actor || !a_equippedArmor) {
+            return false;
+        }
+
+        const auto* body = a_actor->GetWornArmor(Slot::kBody);
+        const auto* outerChest = a_actor->GetWornArmor(Slot::kModChestPrimary);
+        const auto* underChest = a_actor->GetWornArmor(Slot::kModChestSecondary);
+
+        return body == a_equippedArmor || outerChest == a_equippedArmor || underChest == a_equippedArmor;
+    };
+
     if (clotheActive && naked) {
         logger::info("Removing clothed preset to actor {}", a_actor->GetName());
         RemoveClothePreset(a_actor);
@@ -151,7 +145,7 @@ namespace Body {
         ApplyClothePreset(a_actor);
         ApplyMorphs(a_actor, true);
         orefitIsApplied = true;
-    } else if (clotheActive && !naked && setRefit && equippedArmorTouchesORefitSlots) {
+    } else if (clotheActive && !naked && setRefit && equippedArmorTouchesORefitSlots()) {
         logger::info("Reapplying clothed preset to actor {} after body/chest equipment change", a_actor->GetName());
         RemoveClothePreset(a_actor);
         ApplyClothePreset(a_actor);
@@ -177,19 +171,18 @@ notifyNativeEventListeners:
             static_assert(Event::OnActorClothingUpdate::Flags::IsBlacklisted == (1 << 4));
             static_assert(Event::OnActorClothingUpdate::Flags::ActorIsEquipping == (1 << 5));
 
-            flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | uint64_t(!naked));
-            flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(orefitIsApplied) << 1));
-            flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(setRefit) << 2));
-            flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(isProcessed) << 3));
-            flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(isBlacklisted) << 4));
-            flags = static_cast<Event::OnActorClothingUpdate::Flags>(flags | (uint64_t(!a_removingArmor) << 5));
+            flags = static_cast(flags | uint64_t(!naked));
+            flags = static_cast(flags | (uint64_t(orefitIsApplied) << 1));
+            flags = static_cast(flags | (uint64_t(setRefit) << 2));
+            flags = static_cast(flags | (uint64_t(isProcessed) << 3));
+            flags = static_cast(flags | (uint64_t(isBlacklisted) << 4));
+            flags = static_cast(flags | (uint64_t(!a_removingArmor) << 5));
             return std::make_pair(flags, payload);
         },
         [](auto listener, auto actor, auto&& args) {
             listener->OnActorClothingUpdate(actor, args.first, args.second);
         });
 }
-
 
 
     void OBody::GenerateActorBody(RE::Actor* a_actor, ::OBody::API::IPluginInterface* responsibleInterface) const {
